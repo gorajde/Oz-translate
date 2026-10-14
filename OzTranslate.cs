@@ -512,13 +512,13 @@ namespace OzTranslate
         void BeginTranslate(Point p, int lines, int gen)
         {
             if (!_ocr.Available) return;
-            if (Interlocked.Exchange(ref _busy, 1) == 1 && lines < 15)
+            // Aynı anda yalnızca bir OCR/çeviri görevi çalışabilir.
+            // Meşgul durumda bayrağı değiştirme: bayrak çalışan göreve aittir.
+            if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0)
             {
-                // Bir iş zaten sürüyor; normal taramayı atla (Tab her zaman geçsin).
-                Interlocked.Exchange(ref _busy, 0);
+                Logger.Log("OCR request skipped: worker busy");
                 return;
             }
-            _busy = 1;
 
             Task.Run(delegate
             {
@@ -558,15 +558,20 @@ namespace OzTranslate
                     Rectangle block;
                     string text = PickLines(ocr, left, top, p.X - left, p.Y - top, lines, SCALE, out block);
                     if (string.IsNullOrEmpty(text)) { Logger.Log("lines=" + lines + " OCR: (metin yok)"); PostHide(gen); return; }
-                    Logger.Log("lines=" + lines + " EN=[" + text + "]");
+                    Logger.Log("OCR recognized text; characters=" + text.Length);
 
                     string tr = Translator.Translate(text);
                     if (gen != _generation) return;
                     if (string.IsNullOrEmpty(tr)) tr = "[çeviri alınamadı]";
-                    Logger.Log("        TR=[" + tr + "]");
+                    Logger.Log("Translation completed; characters=" + tr.Length);
                     PostShow(gen, tr, block, p);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    // Metinleri veya URL'leri günlüğe yazma: yalnızca hata türü.
+                    Logger.Log("Translation worker error: " + ex.GetType().Name);
+                    PostHide(gen);
+                }
                 finally { Interlocked.Exchange(ref _busy, 0); }
             });
         }
