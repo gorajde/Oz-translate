@@ -4,3 +4,4 @@ oz-debug.log
 # Geçici / sistem dosyaları
 Thumbs.db
 desktop.ini
+tests/artifacts/

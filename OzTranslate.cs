@@ -1,4 +1,4 @@
-// Oz-translate — fare imlecinin altındaki İngilizce metni okuyup Türkçeye çeviren
+﻿// Oz-translate — fare imlecinin altındaki İngilizce metni okuyup Türkçeye çeviren
 // sistem tepsisi uygulaması. Windows yerleşik OCR + Google Çeviri kullanır.
 // Tek dosya, .NET Framework, ekstra kurulum gerektirmez.
 
@@ -75,17 +75,18 @@ namespace OzTranslate
 
         public static string Translate(string text)
         {
-            if (string.IsNullOrEmpty(text)) return "";
+            if (!TextPolicy.HasText(text)) return "";
             lock (_lock)
             {
                 string hit;
                 if (_cache.TryGetValue(text, out hit)) return hit;
             }
 
-            string url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=tr&dt=t&q="
+            string url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=tr&dt=t&q="
                          + Uri.EscapeDataString(text);
             string json = _http.GetStringAsync(url).GetAwaiter().GetResult();
 
+            string sourceLanguage = "";
             StringBuilder sb = new StringBuilder();
             try
             {
@@ -93,6 +94,7 @@ namespace OzTranslate
                 ser.MaxJsonLength = 8 * 1024 * 1024;
                 object root = ser.DeserializeObject(json);
                 object[] arr = root as object[];
+                if (arr != null && arr.Length > 2) sourceLanguage = arr[2] as string ?? "";
                 object[] sentences = (arr != null && arr.Length > 0) ? arr[0] as object[] : null;
                 if (sentences != null)
                 {
@@ -106,8 +108,9 @@ namespace OzTranslate
             }
             catch { }
 
-            string result = sb.ToString().Trim();
-            if (result.Length > 0)
+            string result = TextPolicy.DisplayTranslation(text, sb.ToString(), sourceLanguage);
+            // Boş sonuçları da önbelleğe al: Türkçe/aynı metni tekrar gönderme.
+            if (!string.IsNullOrEmpty(sourceLanguage))
             {
                 lock (_lock)
                 {
@@ -116,6 +119,186 @@ namespace OzTranslate
                 }
             }
             return result;
+        }
+    }
+
+    static class TextPolicy
+    {
+        public static bool HasText(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return false;
+            foreach (char c in text) if (char.IsLetter(c)) return true;
+            return false;
+        }
+
+        static string ComparisonKey(string text)
+        {
+            StringBuilder key = new StringBuilder();
+            foreach (char c in (text ?? "").Normalize(NormalizationForm.FormKD).ToLowerInvariant())
+                if (char.IsLetterOrDigit(c)) key.Append(c == 'ı' ? 'i' : c);
+            return key.ToString();
+        }
+
+        public static string DisplayTranslation(string source, string translated, string language)
+        {
+            if (!HasText(source) || !HasText(translated) || string.IsNullOrEmpty(language)) return "";
+            if (language.Equals("tr", StringComparison.OrdinalIgnoreCase) ||
+                language.StartsWith("tr-", StringComparison.OrdinalIgnoreCase)) return "";
+            if (ComparisonKey(source) == ComparisonKey(translated)) return "";
+            return translated.Trim();
+        }
+    }
+
+    class AppSettings
+    {
+        public int Background { get; set; }
+        public int Foreground { get; set; }
+        public int Border { get; set; }
+        public int OpacityPercent { get; set; }
+        public float FontSize { get; set; }
+
+        public AppSettings()
+        {
+            Background = Color.FromArgb(34, 37, 43).ToArgb();
+            Foreground = Color.FromArgb(240, 240, 242).ToArgb();
+            Border = Color.FromArgb(0, 150, 215).ToArgb();
+            OpacityPercent = 96;
+            FontSize = 12.5f;
+        }
+
+        static string FilePath { get { return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Oz-translate", "settings.json"); } }
+
+        public void Validate()
+        {
+            OpacityPercent = Math.Max(30, Math.Min(100, OpacityPercent));
+            if (float.IsNaN(FontSize) || float.IsInfinity(FontSize)) FontSize = 12.5f;
+            FontSize = Math.Max(8, Math.Min(28, FontSize));
+        }
+
+        public static AppSettings Load()
+        {
+            try
+            {
+                AppSettings value = new JavaScriptSerializer().Deserialize<AppSettings>(File.ReadAllText(FilePath));
+                if (value != null) { value.Validate(); return value; }
+            }
+            catch { }
+            return new AppSettings();
+        }
+
+        public void Save()
+        {
+            Validate();
+            Directory.CreateDirectory(Path.GetDirectoryName(FilePath));
+            string temporary = FilePath + ".tmp";
+            File.WriteAllText(temporary, new JavaScriptSerializer().Serialize(this), Encoding.UTF8);
+            if (File.Exists(FilePath)) File.Replace(temporary, FilePath, null);
+            else File.Move(temporary, FilePath);
+        }
+    }
+
+    class SettingsForm : Form
+    {
+        readonly Button _background = new Button(), _foreground = new Button(), _border = new Button();
+        readonly NumericUpDown _opacity = new NumericUpDown(), _fontSize = new NumericUpDown();
+        readonly CheckBox _startup = new CheckBox();
+        readonly Func<bool> _getStartup;
+        readonly Func<bool, bool> _setStartup;
+        readonly Action<AppSettings> _apply;
+
+        public SettingsForm(AppSettings settings, Func<bool> getStartup, Func<bool, bool> setStartup, Action<AppSettings> apply)
+        {
+            _getStartup = getStartup; _setStartup = setStartup; _apply = apply;
+            Text = "Oz-translate ayarları";
+            StartPosition = FormStartPosition.CenterScreen;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            AutoScaleMode = AutoScaleMode.Dpi;
+            ClientSize = new Size(440, 440);
+            Font = new Font("Segoe UI", 10);
+            TableLayoutPanel layout = new TableLayoutPanel();
+            layout.Dock = DockStyle.Fill; layout.Padding = new Padding(18);
+            layout.ColumnCount = 2; layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
+            Controls.Add(layout);
+            AddRow(layout, "Balon arka planı", _background);
+            AddRow(layout, "Yazı rengi", _foreground);
+            AddRow(layout, "Çerçeve rengi", _border);
+            foreach (Button button in new Button[] { _background, _foreground, _border })
+            {
+                button.Text = "renk seç"; button.UseVisualStyleBackColor = false;
+                button.Click += delegate(object sender, EventArgs e)
+                {
+                    Button selected = (Button)sender;
+                    using (ColorDialog dialog = new ColorDialog())
+                    {
+                        dialog.Color = selected.BackColor;
+                        if (dialog.ShowDialog(this) == DialogResult.OK) SetColor(selected, dialog.Color);
+                    }
+                };
+            }
+            _opacity.Minimum = 30; _opacity.Maximum = 100;
+            AddRow(layout, "Opaklık (%)", _opacity);
+            _fontSize.Minimum = 8; _fontSize.Maximum = 28; _fontSize.DecimalPlaces = 1; _fontSize.Increment = 0.5m;
+            AddRow(layout, "Yazı boyutu (punto)", _fontSize);
+            _startup.Text = "Windows ile başlat"; _startup.AutoSize = true;
+            layout.Controls.Add(_startup); layout.SetColumnSpan(_startup, 2);
+            Label help = new Label();
+            help.Text = "ctrl + alt + z: çeviriyi aç / kapat\r\ntab: balon açıkken 15 satır çevir\r\nö simgesine çift tık: ayarları aç\r\nx: ayarları gizle; program tepside çalışmaya devam eder\r\nbalonu taşımak için üstündeki tutamacı sürükle\r\ndüşük opaklık balonu daha saydam yapar";
+            help.Font = new Font("Segoe UI", 8.5f); help.AutoSize = true;
+            help.Margin = new Padding(0, 12, 0, 12);
+            layout.Controls.Add(help); layout.SetColumnSpan(help, 2);
+            Button reset = new Button(); reset.Text = "Varsayılanlara sıfırla"; reset.AutoSize = true;
+            reset.Click += delegate { ApplySettings(new AppSettings(), false); };
+            layout.Controls.Add(reset);
+            Button save = new Button(); save.Text = "Uygula"; save.AutoSize = true;
+            save.Click += delegate { ApplySettings(ReadSettings(), _startup.Checked); };
+            layout.Controls.Add(save);
+            LoadSettings(settings);
+        }
+
+        static void AddRow(TableLayoutPanel layout, string title, Control control)
+        {
+            Label label = new Label(); label.Text = title; label.AutoSize = true; label.Anchor = AnchorStyles.Left;
+            control.Dock = DockStyle.Fill; control.Margin = new Padding(3, 3, 3, 6);
+            layout.Controls.Add(label); layout.Controls.Add(control);
+        }
+
+        static void SetColor(Button button, Color color)
+        {
+            button.BackColor = Color.FromArgb(255, color);
+            button.ForeColor = color.GetBrightness() < 0.5f ? Color.White : Color.Black;
+        }
+
+        public void LoadSettings(AppSettings settings)
+        {
+            SetColor(_background, Color.FromArgb(settings.Background));
+            SetColor(_foreground, Color.FromArgb(settings.Foreground));
+            SetColor(_border, Color.FromArgb(settings.Border));
+            _opacity.Value = settings.OpacityPercent; _fontSize.Value = (decimal)settings.FontSize;
+            _startup.Checked = _getStartup();
+        }
+
+        AppSettings ReadSettings()
+        {
+            return new AppSettings { Background = _background.BackColor.ToArgb(), Foreground = _foreground.BackColor.ToArgb(),
+                Border = _border.BackColor.ToArgb(), OpacityPercent = (int)_opacity.Value, FontSize = (float)_fontSize.Value };
+        }
+
+        void ApplySettings(AppSettings settings, bool startup)
+        {
+            try { settings.Save(); }
+            catch { MessageBox.Show(this, "ayarlar kaydedilemedi. klasörün yazma iznini kontrol edin.", "Oz-translate"); return; }
+            _apply(settings);
+            if (!_setStartup(startup)) MessageBox.Show(this, "windows ile başlatma tercihi kaydedilemedi.", "Oz-translate");
+            LoadSettings(settings);
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            if (e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); }
+            base.OnFormClosing(e);
         }
     }
 
@@ -201,17 +384,20 @@ namespace OzTranslate
                 bytes = ms.ToArray();
             }
 
-            InMemoryRandomAccessStream ras = new InMemoryRandomAccessStream();
-            DataWriter writer = new DataWriter(ras.GetOutputStreamAt(0));
-            writer.WriteBytes(bytes);
-            Await<uint>(writer.StoreAsync());
-            Await<bool>(writer.FlushAsync());
-            writer.DetachStream();
-            ras.Seek(0);
-
-            BitmapDecoder decoder = Await<BitmapDecoder>(BitmapDecoder.CreateAsync(ras));
-            SoftwareBitmap sb = Await<SoftwareBitmap>(decoder.GetSoftwareBitmapAsync());
-            return Await<OcrResult>(_engine.RecognizeAsync(sb));
+            using (InMemoryRandomAccessStream ras = new InMemoryRandomAccessStream())
+            {
+                using (DataWriter writer = new DataWriter(ras.GetOutputStreamAt(0)))
+                {
+                    writer.WriteBytes(bytes);
+                    Await<uint>(writer.StoreAsync());
+                    Await<bool>(writer.FlushAsync());
+                    writer.DetachStream();
+                }
+                ras.Seek(0);
+                BitmapDecoder decoder = Await<BitmapDecoder>(BitmapDecoder.CreateAsync(ras));
+                using (SoftwareBitmap bitmap = Await<SoftwareBitmap>(decoder.GetSoftwareBitmapAsync()))
+                    return Await<OcrResult>(_engine.RecognizeAsync(bitmap));
+            }
         }
     }
 
@@ -223,7 +409,49 @@ namespace OzTranslate
         const int MAXW = 470;
         const int RADIUS = 12;
 
-        readonly Font _font = new Font("Segoe UI", 12.5f, FontStyle.Regular);
+        Font _font;
+        AppSettings _appearance;
+        readonly DragHandle _handle;
+        Point _dragCursor, _dragLocation;
+        public bool Dragging { get; private set; }
+        public bool ContainsPointer(Point point)
+        {
+            return Visible && (Bounds.Contains(point) || _handle.Bounds.Contains(point) || Dragging);
+        }
+
+        public void ApplySettings(AppSettings settings)
+        {
+            _appearance = settings;
+            if (_font != null) _font.Dispose();
+            _font = new Font("Segoe UI", settings.FontSize, FontStyle.Regular);
+            Opacity = settings.OpacityPercent / 100.0;
+            BackColor = Color.FromArgb(settings.Background);
+            _handle.BackColor = Color.FromArgb(settings.Border);
+            Hide();
+            Invalidate();
+        }
+
+        // Ayrı tutamaç penceresi: metin balonu tıklama geçişini korur.
+        sealed class DragHandle : Form
+        {
+            public DragHandle()
+            {
+                FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false;
+                StartPosition = FormStartPosition.Manual; AutoScaleMode = AutoScaleMode.None;
+                Size = new Size(64, 18); TopMost = true; Cursor = Cursors.SizeAll;
+                AccessibleName = "balonu taşımak için sürükle";
+            }
+            protected override bool ShowWithoutActivation { get { return true; } }
+            protected override CreateParams CreateParams
+            {
+                get { CreateParams cp = base.CreateParams; cp.ExStyle |= 0x08000000 | 0x00000080; return cp; }
+            }
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                using (Pen pen = new Pen(BackColor.GetBrightness() < 0.5f ? Color.White : Color.Black))
+                    for (int y = 6; y <= 12; y += 3) e.Graphics.DrawLine(pen, 22, y, 42, y);
+            }
+        }
         string _text = "";
 
         public PopupForm()
@@ -234,8 +462,24 @@ namespace OzTranslate
             ShowInTaskbar = false;
             TopMost = true;
             DoubleBuffered = true;
-            Opacity = 0.96;
-            BackColor = Color.FromArgb(34, 37, 43);
+            _handle = new DragHandle();
+            _handle.MouseDown += delegate(object sender, MouseEventArgs e)
+            {
+                if (e.Button != MouseButtons.Left) return;
+                Dragging = true; _dragCursor = Cursor.Position; _dragLocation = Location; _handle.Capture = true;
+            };
+            _handle.MouseMove += delegate
+            {
+                if (!Dragging) return;
+                Point cursor = Cursor.Position;
+                Rectangle area = Screen.FromPoint(cursor).WorkingArea;
+                Location = new Point(Math.Max(area.Left, Math.Min(area.Right - Width, _dragLocation.X + cursor.X - _dragCursor.X)),
+                    Math.Max(area.Top + 18, Math.Min(area.Bottom - Height, _dragLocation.Y + cursor.Y - _dragCursor.Y)));
+                PlaceHandle();
+            };
+            _handle.MouseUp += delegate { Dragging = false; _handle.Capture = false; };
+            _handle.MouseCaptureChanged += delegate { if (!_handle.Capture) Dragging = false; };
+            ApplySettings(new AppSettings());
             Visible = false;
             IntPtr forceHandle = this.Handle; // arka plandan BeginInvoke için handle'ı oluştur
             GC.KeepAlive(forceHandle);
@@ -271,7 +515,8 @@ namespace OzTranslate
 
         public void ShowAt(string text, Rectangle block, Point cursor)
         {
-            _text = text == null ? "" : text;
+            if (string.IsNullOrWhiteSpace(text)) { Hide(); return; }
+            _text = text;
 
             Size max = new Size(MAXW - 2 * PAD, 4096);
             Size sz = TextRenderer.MeasureText(_text, _font, max,
@@ -281,8 +526,10 @@ namespace OzTranslate
             if (w < 60) w = 60;
             ClientSize = new Size(w, h);
 
+            Region previous = Region;
             using (GraphicsPath gp = Round(new Rectangle(0, 0, w, h), RADIUS))
                 Region = new Region(gp);
+            if (previous != null) previous.Dispose();
 
             Rectangle wa = Screen.FromPoint(cursor).WorkingArea;
             int x, y; string br;
@@ -300,10 +547,31 @@ namespace OzTranslate
                        " size=" + w + "x" + h + " branch=" + br + " -> " + x + "," + y);
 
             if (!Visible) Show();
+            PlaceHandle();
+            if (!_handle.Visible) _handle.Show(this);
             // WinForms/DPI bazen Location'ı kaydırır; konum+boyutu fiziksel piksellerle kesin uygula.
             NativeMethods.SetWindowPos(Handle, NativeMethods.HWND_TOPMOST, x, y, w, h, NativeMethods.SWP_NOACTIVATE);
             Invalidate();
             Logger.Log("ShowAt want=" + x + "," + y + " real=" + Bounds.X + "," + Bounds.Y + " size=" + w + "x" + h);
+        }
+
+        void PlaceHandle()
+        {
+            Rectangle area = Screen.FromRectangle(Bounds).WorkingArea;
+            _handle.Location = new Point(Math.Max(area.Left, Math.Min(area.Right - _handle.Width, Left + (Width - _handle.Width) / 2)),
+                Top - _handle.Height >= area.Top ? Top - _handle.Height : Top);
+        }
+
+        protected override void OnVisibleChanged(EventArgs e)
+        {
+            base.OnVisibleChanged(e);
+            if (!Visible && _handle != null) { _handle.Hide(); Dragging = false; }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { if (_handle != null) _handle.Dispose(); if (_font != null) _font.Dispose(); }
+            base.Dispose(disposing);
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -313,11 +581,11 @@ namespace OzTranslate
             Rectangle rc = new Rectangle(0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
             using (GraphicsPath gp = Round(rc, RADIUS))
             {
-                using (Brush b = new SolidBrush(Color.FromArgb(34, 37, 43))) g.FillPath(b, gp);
-                using (Pen pen = new Pen(Color.FromArgb(0, 150, 215), 1.4f)) g.DrawPath(pen, gp);
+                using (Brush b = new SolidBrush(Color.FromArgb(_appearance.Background))) g.FillPath(b, gp);
+                using (Pen pen = new Pen(Color.FromArgb(_appearance.Border), 1.4f)) g.DrawPath(pen, gp);
             }
             Rectangle txt = new Rectangle(PAD, PAD, ClientSize.Width - 2 * PAD, ClientSize.Height - 2 * PAD);
-            TextRenderer.DrawText(g, _text, _font, txt, Color.FromArgb(240, 240, 242),
+            TextRenderer.DrawText(g, _text, _font, txt, Color.FromArgb(_appearance.Foreground),
                 TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.Top | TextFormatFlags.Left);
         }
     }
@@ -358,6 +626,10 @@ namespace OzTranslate
         readonly NotifyIcon _tray;
         readonly ToolStripMenuItem _miActive;
         readonly ToolStripMenuItem _miAuto;
+        readonly SettingsForm _settingsForm;
+        AppSettings _settings;
+        DateTime _popupGraceUntil;
+        bool _exiting;
         readonly PopupForm _popup;
         readonly System.Windows.Forms.Timer _timer;
         readonly OcrService _ocr;
@@ -374,12 +646,24 @@ namespace OzTranslate
         Point _lastPos = Point.Empty;
         int _stillTicks = 0;
         bool _pending = false;
+        int _pendingLines = 5;
+        Point _translationPoint;
         int _busy = 0;
 
         public TrayContext()
         {
             _ocr = new OcrService();
             _popup = new PopupForm();
+            _settings = AppSettings.Load();
+            _popup.ApplySettings(_settings);
+            _settingsForm = new SettingsForm(_settings, IsAutoStart, SetAutoStart, delegate(AppSettings settings)
+            {
+                _settings = settings; _generation++; HidePopup(); _popup.ApplySettings(settings);
+            });
+            _settingsForm.VisibleChanged += delegate
+            {
+                _generation++; HidePopup(); _pending = true; _stillTicks = 0; _lastPos = Cursor.Position;
+            };
 
             _iconOn = MakeIcon(Color.FromArgb(0, 150, 215));
             _iconOff = MakeIcon(Color.FromArgb(120, 120, 120));
@@ -399,8 +683,16 @@ namespace OzTranslate
             _miAuto = new ToolStripMenuItem("Windows açılışında başlat");
             _miAuto.CheckOnClick = true;
             _miAuto.Checked = IsAutoStart();
-            _miAuto.Click += delegate { SetAutoStart(_miAuto.Checked); };
+            _miAuto.Click += delegate
+            {
+                if (!SetAutoStart(_miAuto.Checked))
+                    MessageBox.Show("windows ile başlatma tercihi kaydedilemedi.", "Oz-translate");
+                _miAuto.Checked = IsAutoStart();
+            };
             menu.Items.Add(_miAuto);
+            ToolStripMenuItem miSettings = new ToolStripMenuItem("Ayarlar");
+            miSettings.Click += delegate { ShowSettings(); };
+            menu.Items.Add(miSettings);
 
             menu.Items.Add(new ToolStripSeparator());
             ToolStripMenuItem miExit = new ToolStripMenuItem("Çıkış");
@@ -412,7 +704,7 @@ namespace OzTranslate
             _tray.Text = "Oz-translate (Aktif)";
             _tray.Visible = true;
             _tray.ContextMenuStrip = menu;
-            _tray.DoubleClick += delegate { ToggleActive(); };
+            _tray.DoubleClick += delegate { ShowSettings(); };
 
             if (!_ocr.Available)
             {
@@ -462,10 +754,22 @@ namespace OzTranslate
             }
         }
 
+        void ShowSettings()
+        {
+            if (!_settingsForm.Visible) { _settingsForm.LoadSettings(_settings); _settingsForm.Show(); }
+            if (_settingsForm.WindowState == FormWindowState.Minimized) _settingsForm.WindowState = FormWindowState.Normal;
+            _settingsForm.Activate();
+        }
+
         void OnTick(object sender, EventArgs e)
         {
-            if (!_active) return;
+            if (!_active || _settingsForm.Visible || _exiting) return;
             Point p = Cursor.Position;
+            if (_popup.ContainsPointer(p))
+            {
+                _lastPos = p; _stillTicks = 0; _popupGraceUntil = DateTime.UtcNow.AddMilliseconds(1000);
+                return;
+            }
             int dx = p.X - _lastPos.X;
             int dy = p.Y - _lastPos.Y;
             if (dx * dx + dy * dy > MOVE_THRESHOLD * MOVE_THRESHOLD)
@@ -473,9 +777,17 @@ namespace OzTranslate
                 _lastPos = p;
                 _stillTicks = 0;
                 _pending = true;
+                _pendingLines = 5;
                 _generation++;       // devam eden işi geçersiz kıl
-                HidePopup();
+                // Tutamaca ulaşmak için kısa süre tanı; OCR önce balonu gizler.
+                if (_popupVisible && _popupGraceUntil == DateTime.MinValue)
+                    _popupGraceUntil = DateTime.UtcNow.AddMilliseconds(1000);
                 return;
+            }
+            if (_popupVisible && _popupGraceUntil != DateTime.MinValue)
+            {
+                if (DateTime.UtcNow < _popupGraceUntil) return;
+                HidePopup();
             }
             if (_pending)
             {
@@ -483,14 +795,14 @@ namespace OzTranslate
                 if (_stillTicks >= DWELL_TICKS)
                 {
                     _pending = false;
-                    BeginTranslate(p, 5, _generation);
+                    BeginTranslate(p, _pendingLines, _generation);
                 }
             }
         }
 
         IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam)
         {
-            if (nCode >= 0 && _active && _popupVisible)
+            if (nCode >= 0 && _active && _popupVisible && !_settingsForm.Visible && !_popup.Dragging)
             {
                 int msg = wParam.ToInt32();
                 if (msg == NativeMethods.WM_KEYDOWN || msg == NativeMethods.WM_SYSKEYDOWN)
@@ -500,6 +812,7 @@ namespace OzTranslate
                     if (k.vkCode == NativeMethods.VK_TAB)
                     {
                         Point p = Cursor.Position;
+                        if (_popup.ContainsPointer(p)) p = _translationPoint;
                         _generation++;
                         BeginTranslate(p, 15, _generation);
                         return new IntPtr(1); // Tab'ı yut (odak değişmesin)
@@ -511,15 +824,17 @@ namespace OzTranslate
 
         void BeginTranslate(Point p, int lines, int gen)
         {
-            if (!_ocr.Available) return;
+            if (!_ocr.Available || _exiting) return;
             // Aynı anda yalnızca bir OCR/çeviri görevi çalışabilir.
             // Meşgul durumda bayrağı değiştirme: bayrak çalışan göreve aittir.
             if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0)
             {
-                Logger.Log("OCR request skipped: worker busy");
+                _pending = true; _pendingLines = lines; _stillTicks = 0;
+                Logger.Log("OCR request deferred: worker busy");
                 return;
             }
 
+            HidePopup();
             Task.Run(delegate
             {
                 try
@@ -556,13 +871,19 @@ namespace OzTranslate
                     if (ocr == null || gen != _generation) return;
 
                     Rectangle block;
-                    string text = PickLines(ocr, left, top, p.X - left, p.Y - top, lines, SCALE, out block);
+                    string anchorText;
+                    string text = PickLines(ocr, left, top, p.X - left, p.Y - top, lines, SCALE, out block, out anchorText);
                     if (string.IsNullOrEmpty(text)) { Logger.Log("lines=" + lines + " OCR: (metin yok)"); PostHide(gen); return; }
                     Logger.Log("OCR recognized text; characters=" + text.Length);
 
+                    // Çevredeki İngilizce satırlar, imleç altındaki Türkçe satırın
+                    // dilini bastırmasın. Önce hedef satırın çevrilebilirliğini doğrula.
+                    string anchorTranslation = Translator.Translate(anchorText);
+                    if (gen != _generation) return;
+                    if (string.IsNullOrWhiteSpace(anchorTranslation)) { PostHide(gen); return; }
                     string tr = Translator.Translate(text);
                     if (gen != _generation) return;
-                    if (string.IsNullOrEmpty(tr)) tr = "[çeviri alınamadı]";
+                    if (string.IsNullOrWhiteSpace(tr)) { PostHide(gen); return; }
                     Logger.Log("Translation completed; characters=" + tr.Length);
                     PostShow(gen, tr, block, p);
                 }
@@ -576,9 +897,10 @@ namespace OzTranslate
             });
         }
 
-        static string PickLines(OcrResult ocr, int left, int top, int cursorX, int cursorY, int lines, int scale, out Rectangle block)
+        static string PickLines(OcrResult ocr, int left, int top, int cursorX, int cursorY, int lines, int scale, out Rectangle block, out string anchorText)
         {
             block = Rectangle.Empty;
+            anchorText = "";
             List<double[]> rows = new List<double[]>(); // t,b,l,r,centerY
             List<string> texts = new List<string>();
             foreach (OcrLine ln in ocr.Lines)
@@ -604,22 +926,18 @@ namespace OzTranslate
             for (int i = 0; i < idx.Length; i++) idx[i] = i;
             Array.Sort(idx, delegate(int a, int c) { return rows[a][4].CompareTo(rows[c][4]); });
 
-            // imlecin bulunduğu satırı bul (dikeyde)
             int target = -1;
+            double best = double.MaxValue;
             for (int i = 0; i < idx.Length; i++)
             {
-                double[] rw = rows[idx[i]];
-                if (cursorY >= rw[0] - 4 && cursorY <= rw[1] + 4) { target = i; break; }
+                double[] row = rows[idx[i]];
+                if (cursorY < row[0] - 4 || cursorY > row[1] + 4 ||
+                    cursorX < row[2] - 8 || cursorX > row[3] + 8) continue;
+                double distance = Math.Abs(row[4] - cursorY);
+                if (distance < best) { best = distance; target = i; }
             }
-            if (target < 0)
-            {
-                double best = double.MaxValue;
-                for (int i = 0; i < idx.Length; i++)
-                {
-                    double d = Math.Abs(rows[idx[i]][4] - cursorY);
-                    if (d < best) { best = d; target = i; }
-                }
-            }
+            if (target < 0) return "";
+            anchorText = texts[idx[target]];
 
             // imlecin sütununu (yatay aralık) belirle: hedef satır + imleç x'i
             double colL = rows[idx[target]][2];
@@ -660,17 +978,10 @@ namespace OzTranslate
                 if (rw[0] < minT) minT = rw[0];
                 if (rw[1] > maxB) maxB = rw[1];
             }
-            string text = Normalize(sb.ToString().Trim());
+            string text = sb.ToString().Trim();
             if (text.Length == 0) return "";
             block = Rectangle.FromLTRB(left + (int)minL, top + (int)minT, left + (int)maxR, top + (int)maxB);
             return text;
-        }
-
-        // Türkçe OCR motorunun İngilizce metinde ürettiği noktalı İ / noktasız ı'yı düzelt.
-        static string Normalize(string s)
-        {
-            if (string.IsNullOrEmpty(s)) return s;
-            return s.Replace('İ', 'I').Replace('ı', 'i');
         }
 
         void PostShow(int gen, string text, Rectangle block, Point cursor)
@@ -680,8 +991,9 @@ namespace OzTranslate
             {
                 _popup.BeginInvoke((Action)delegate
                 {
-                    if (gen != _generation || !_active) return;
+                    if (gen != _generation || !_active || _exiting || _settingsForm.Visible) return;
                     _popup.ShowAt(text, block, cursor);
+                    _translationPoint = cursor;
                     _popupVisible = true;
                 });
             }
@@ -704,6 +1016,7 @@ namespace OzTranslate
 
         void HidePopup()
         {
+            _popupGraceUntil = DateTime.MinValue;
             if (_popupVisible)
             {
                 _popup.Hide();
@@ -714,6 +1027,7 @@ namespace OzTranslate
         void ToggleActive()
         {
             _active = !_active;
+            _pending = _active; _stillTicks = 0;
             _miActive.Checked = _active;
             _tray.Icon = _active ? _iconOn : _iconOff;
             _tray.Text = _active ? "Oz-translate (Aktif)" : "Oz-translate (Pasif)";
@@ -747,7 +1061,7 @@ namespace OzTranslate
             catch { return false; }
         }
 
-        static void SetAutoStart(bool on)
+        static bool SetAutoStart(bool on)
         {
             try
             {
@@ -758,11 +1072,14 @@ namespace OzTranslate
                     else if (k.GetValue("Oz-translate") != null) k.DeleteValue("Oz-translate");
                 }
             }
-            catch { }
+            catch { return false; }
+            return IsAutoStart() == on;
         }
 
         void ExitApp()
         {
+            _exiting = true; _active = false; _generation++;
+            _settingsForm.Dispose();
             try { _timer.Stop(); } catch { }
             try { if (_hookId != IntPtr.Zero) NativeMethods.UnhookWindowsHookEx(_hookId); } catch { }
             try { NativeMethods.UnregisterHotKey(_hotkey.Handle, HOTKEY_ID); } catch { }
@@ -786,7 +1103,7 @@ namespace OzTranslate
                 try
                 {
                     ServicePointManager.SecurityProtocol =
-                        SecurityProtocolType.Tls12 | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls;
+                        SecurityProtocolType.Tls12;
                 }
                 catch { }
                 Application.EnableVisualStyles();
