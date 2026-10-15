@@ -690,6 +690,7 @@ namespace OzTranslate
                 _miAuto.Checked = IsAutoStart();
             };
             menu.Items.Add(_miAuto);
+            menu.Opening += delegate { _miAuto.Checked = IsAutoStart(); };
             ToolStripMenuItem miSettings = new ToolStripMenuItem("Ayarlar");
             miSettings.Click += delegate { ShowSettings(); };
             menu.Items.Add(miSettings);
