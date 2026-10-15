@@ -1,68 +1,43 @@
-================================================================
-  Oz-translate  —  Fareyle anlık İngilizce -> Türkçe çeviri
-================================================================
+﻿Oz-translate — ekran metnini Türkçeye çevirir
 
-NE YAPAR?
-  Fare imlecini ekrandaki herhangi bir İNGİLİZCE yazının üzerine
-  getirdiğinizde, o yazının imlecin bulunduğu 5 satırlık kısmını
-  okuyup yanında TÜRKÇE çevirisini küçük bir balonda gösterir.
-  Fareyi başka satırlara kaydırdıkça çeviri otomatik yenilenir;
-  eski balon hemen kapanır.
+kurulum:
+  Kur.bat dosyasını çalıştırın. Windows ile başlatmayı ayarlardan
+  seçebilirsiniz; kurulum mevcut başlangıç tercihini değiştirmez.
 
-  - Çalışır: masaüstü programları VE tarayıcılar (Chrome, Edge…)
-    fark etmez. Ekranda görünen yazıyı "görerek" (OCR ile) okur.
-  - Çeviri kaynağı: Google Çeviri (çevrimiçi).
-  - Yazıyı okumak için Windows'un kendi OCR motorunu kullanır.
+kullanım ve kısayollar:
+  fareyi metnin üzerinde yaklaşık yarım saniye tutun: 5 satır çeviri.
+  tab: balon açıkken 15 satır çeviri.
+  ctrl + alt + z: çeviriyi aç / kapat.
+  tepsideki ö simgesine çift tık: tek ayarlar penceresini aç.
+  x: ayarları gizle; program çalışmaya devam eder.
+  balonun üstündeki renkli tutamacı sürükle: balonu taşı.
+  tepsiye sağ tık > çıkış: programı tamamen kapat.
 
-KURULUM
-  1) "Kur.bat" dosyasına çift tıklayın.
-  2) Program derlenir, başlatılır ve Windows açılışına eklenir.
-     Bundan sonra bilgisayarı her açtığınızda kendiliğinden çalışır;
-     sizin bir şey yapmanıza gerek yok.
-  (Hiçbir ek program/kurulum gerekmez; Windows'un kendi parçalarını
-   kullanır.)
+ayarlar:
+  balonun arka planını, yazı ve çerçeve renklerini, opaklığını ve
+  yazı boyutunu değiştirin. uygula düğmesi tercihleri kaydeder.
+  düşük opaklık daha fazla saydamlık demektir.
+  windows ile başlatma tercihi aynı pencereden ayarlanır.
+  varsayılanlara sıfırla: koyu zemin, açık yazı, mavi çerçeve,
+  yüzde 96 opaklık, 12,5 punto; windows ile başlatma kapalı.
+  görünüm ayarları: %LOCALAPPDATA%/Oz-translate/settings.json
 
-NASIL KULLANILIR?
-  - Saatin yanındaki bildirim tepsisinde mavi "Ö" ikonu görünür.
-  - Fareyi İngilizce bir yazının üzerinde ~yarım saniye sabit tutun;
-    yan tarafta Türkçe çevirisi belirir (yazının üstünü kapatmaz).
-  - Fareyi gezdirin: nerede durursanız oranın çevirisi yapılır.
-  - DAHA UZUN ÇEVİRİ: yazının üzerindeyken TAB tuşuna basın;
-    5 satır yerine 15 satır (5 + 10) çevrilir.
+çeviri balonu:
+  türkçe algılanan, boş veya çevirisi aynı kalan metinde görünmez.
+  boş alandaki uzak yazılar seçilmez. servis hatasında balon açılmaz.
+  önce imlecin altındaki satırın dili kontrol edilir; sonra bağlam
+  çevrilir. kısa veya hatalı okunmuş metinlerde dil algılama yanılabilir.
+  metin bölümü tıklama geçişlidir, tutamaç sürüklemek içindir.
+  tutamaca gitmek için yaklaşık bir saniye süre vardır. balonun
+  üzerindeyken veya ayarlar açıkken ekran okuma duraklar.
 
-AÇMA / KAPATMA
-  - Kısayol:  Ctrl + Alt + Z   (her yerde çalışır)
-  - Veya tepsi ikonuna ÇİFT TIKLAYIN.
-  - Veya tepsi ikonuna SAĞ TIKLAYIP menüden "Aktif" seçeneğini
-    işaretleyin/kaldırın.
-  Pasifken hiçbir çeviri yapmaz, balon çıkmaz.
+gereksinimler:
+  windows yerleşik ocr dil paketi ve internet bağlantısı gerekir.
+  seçilen metin google çeviri servisine gönderilir.
 
-TEPSİ MENÜSÜ (ikona sağ tık)
-  - Aktif (Ctrl+Alt+Z) ....... programı aç/kapat
-  - Windows açılışında başlat . otomatik başlatmayı aç/kapat
-  - Çıkış .................... programı tamamen kapat
+derleme ve kaldırma:
+  kaynak değiştiğinde build.bat çalıştırın; ek sdk gerekmez.
+  Kaldir.bat programı kapatır ve başlangıç kaydını kaldırır.
+  dosyalar ve kişisel görünüm ayarları korunur.
 
-KALDIRMA
-  - "Kaldir.bat" dosyasına çift tıklayın. Program durdurulur ve
-    otomatik başlatma kaldırılır. İsterseniz klasörü silebilirsiniz.
-
-İYİ SONUÇ İÇİN İPUÇLARI
-  - Yazı ne kadar net/büyükse OCR o kadar doğru okur. Çok küçük
-    puntoda nadiren harf hatası olabilir (program görüntüyü 2 kat
-    büyüterek okur, bu hataları en aza indirir).
-  - Yalnızca İngilizce -> Türkçe yönünde çalışır.
-  - Çeviri için internet bağlantısı gerekir.
-
-DOSYALAR
-  - Oz-translate.exe ... programın kendisi
-  - OzTranslate.cs ..... kaynak kod
-  - build.bat .......... yeniden derlemek için
-  - Kur.bat / Kaldir.bat ... kurulum / kaldırma
-
-NOTLAR
-  - Google'ın ücretsiz çeviri ucunu kullanır; çok yoğun/hızlı
-    kullanımda Google geçici olarak sınırlayabilir. Aynı yazıyı
-    tekrar çevirmemek için program çevirileri kısa süre hatırlar.
-  - Sorun olursa OzTranslate.cs içinde Logger.Enabled = true yapıp
-    yeniden derleyin; klasöre "oz-debug.log" günlüğü yazılır.
-================================================================
+testler ve ayrıntılar için README.md dosyasına bakın.

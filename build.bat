@@ -21,6 +21,7 @@ set DIR=%~dp0
   /r:"%WM%\Windows.Globalization.winmd" ^
   "%DIR%OzTranslate.cs"
 
+set BUILD_RESULT=%ERRORLEVEL%
 if %ERRORLEVEL%==0 (
   echo.
   echo Derleme basarili: "%DIR%Oz-translate.exe"
@@ -28,4 +29,4 @@ if %ERRORLEVEL%==0 (
   echo.
   echo HATA: Derleme basarisiz. Yukaridaki mesajlara bakin.
 )
-endlocal
+endlocal & exit /b %BUILD_RESULT%

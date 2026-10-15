@@ -20,9 +20,6 @@ if not exist "%EXE%" (
   exit /b 1
 )
 
-echo Windows acilisina ekleniyor (otomatik baslatma)...
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "Oz-translate" /t REG_SZ /d "\"%EXE%\"" /f >nul
-
 echo Program baslatiliyor...
 start "" "%EXE%"
 
@@ -35,8 +32,8 @@ echo  - Fareyi ingilizce yazinin uzerine getirin,
 echo    yaninda Turkce cevirisi belirsin.
 echo  - Daha fazla satir icin TAB tusuna basin.
 echo  - Acip/kapatmak icin: Ctrl + Alt + Z
-echo    (veya tepsi ikonuna cift tiklayin)
-echo  - Bilgisayar her acildiginda kendi baslar.
+echo  - Ayarlar icin tepsideki O simgesine cift tiklayin.
+echo  - Windows ile baslatma tercihini ayarlardan secin.
 echo ===========================================
 echo.
 pause
