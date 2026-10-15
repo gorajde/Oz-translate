@@ -1,0 +1,2 @@
+dcdf3d693b0c3ecd6ae1bfaf6f32be1f54ded8121a2dc752b423bf70e17c1ea6  Oz-translate.exe
+96bbbdbb86a64c140d541d254592b551dec864c1027119fc5576d344e95a3ead  Oz-translate-Windows.zip

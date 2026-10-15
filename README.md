@@ -1,5 +1,13 @@
 # Oz-translate
 
+## Güncel sürümü indir
+
+- [Windows için ZIP paketi](https://github.com/gorajde/Oz-translate/raw/refs/heads/fix/ocr-stability-security/downloads/Oz-translate-Windows.zip)
+- [Doğrudan Oz-translate.exe](https://github.com/gorajde/Oz-translate/raw/refs/heads/fix/ocr-stability-security/Oz-translate.exe)
+- [SHA-256 doğrulama dosyası](https://github.com/gorajde/Oz-translate/raw/refs/heads/fix/ocr-stability-security/downloads/SHA256SUMS.txt)
+
+ZIP dosyasını bir klasöre çıkarıp `Oz-translate.exe` dosyasını çalıştırın. Windows ile başlatmayı ayarlardan seçebilirsiniz. Güncellerken önce eski programı tepsi menüsünden kapatın. Bu sürüm fareyle seçilen metni çevirmeyi ve tek pencerede görünüm ayarlarını içerir. Kaynak kod bu daldadır; `main` dalında birleştirme yapılmamıştır.
+
 Fareyle ekran metnini okuyup Türkçeye çeviren Windows tepsi uygulaması. Windows'un yerleşik OCR motorunu, .NET Framework'ü ve Google Çeviri'nin ücretsiz uç noktasını kullanır.
 
 ## Kullanım
