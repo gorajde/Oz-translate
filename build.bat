@@ -14,6 +14,9 @@ set DIR=%~dp0
   /r:"%FW%\System.Web.Extensions.dll" ^
   /r:"%FW%\System.Runtime.dll" ^
   /r:"%FW%\System.Runtime.WindowsRuntime.dll" ^
+  /r:"%FW%\WPF\WindowsBase.dll" ^
+  /r:"%FW%\WPF\UIAutomationClient.dll" ^
+  /r:"%FW%\WPF\UIAutomationTypes.dll" ^
   /r:"%WM%\Windows.Foundation.winmd" ^
   /r:"%WM%\Windows.Media.winmd" ^
   /r:"%WM%\Windows.Graphics.winmd" ^

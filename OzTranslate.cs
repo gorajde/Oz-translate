@@ -17,6 +17,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
+using System.Windows.Automation;
+using System.Windows.Automation.Text;
 using Microsoft.Win32;
 using Windows.Foundation;
 using Windows.Graphics.Imaging;
@@ -33,17 +35,32 @@ namespace OzTranslate
         [DllImport("user32.dll", SetLastError = true)] public static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
         [DllImport("user32.dll", SetLastError = true)] public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
         [DllImport("user32.dll")] public static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
+        [DllImport("user32.dll", EntryPoint = "SetWindowsHookExW")]
+        public static extern IntPtr SetMouseHook(int idHook, LowLevelMouseProc lpfn, IntPtr hMod, uint dwThreadId);
+        [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] public static extern bool UnhookWindowsHookEx(IntPtr hhk);
         [DllImport("user32.dll")] public static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
         [DllImport("kernel32.dll", CharSet = CharSet.Auto)] public static extern IntPtr GetModuleHandle(string lpModuleName);
         [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 
         public delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
+        public delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MSLLHOOKSTRUCT
+        {
+            public Point pt;
+            public uint mouseData, flags, time;
+            public IntPtr dwExtraInfo;
+        }
 
         [StructLayout(LayoutKind.Sequential)]
         public struct KBDLLHOOKSTRUCT { public uint vkCode; public uint scanCode; public uint flags; public uint time; public IntPtr dwExtraInfo; }
 
         public const int WH_KEYBOARD_LL = 13;
+        public const int WH_MOUSE_LL = 14;
+        public const int WM_LBUTTONDOWN = 0x0201;
+        public const int WM_LBUTTONUP = 0x0202;
         public const int WM_KEYDOWN = 0x0100;
         public const int WM_SYSKEYDOWN = 0x0104;
         public const int WM_HOTKEY = 0x0312;
@@ -119,6 +136,37 @@ namespace OzTranslate
                 }
             }
             return result;
+        }
+
+        public static string TranslateSelection(string text)
+        {
+            return TranslateSelection(text, Translate);
+        }
+
+        internal static string TranslateSelection(string text, Func<string, string> translate)
+        {
+            if (!TextPolicy.HasText(text)) return "";
+            StringBuilder result = new StringBuilder();
+            bool changed = false;
+            // Uzun seçimleri URL sınırına takılmadan, kelime sınırlarından böl.
+            for (int start = 0; start < text.Length; )
+            {
+                int end = Math.Min(text.Length, start + 1000);
+                if (end < text.Length)
+                {
+                    int split = end;
+                    while (split > start + 500 && !char.IsWhiteSpace(text[split - 1])) split--;
+                    if (split > start + 500) end = split;
+                    if (char.IsHighSurrogate(text[end - 1])) end--;
+                }
+                string part = text.Substring(start, end - start);
+                string translated = translate(part);
+                if (result.Length > 0) result.AppendLine();
+                result.Append(string.IsNullOrWhiteSpace(translated) ? part : translated);
+                changed |= !string.IsNullOrWhiteSpace(translated);
+                start = end;
+            }
+            return changed ? result.ToString().Trim() : "";
         }
     }
 
@@ -215,7 +263,7 @@ namespace OzTranslate
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             AutoScaleMode = AutoScaleMode.Dpi;
-            ClientSize = new Size(440, 440);
+            ClientSize = new Size(440, 480);
             Font = new Font("Segoe UI", 10);
             TableLayoutPanel layout = new TableLayoutPanel();
             layout.Dock = DockStyle.Fill; layout.Padding = new Padding(18);
@@ -245,7 +293,7 @@ namespace OzTranslate
             _startup.Text = "Windows ile başlat"; _startup.AutoSize = true;
             layout.Controls.Add(_startup); layout.SetColumnSpan(_startup, 2);
             Label help = new Label();
-            help.Text = "ctrl + alt + z: çeviriyi aç / kapat\r\ntab: balon açıkken 15 satır çevir\r\nö simgesine çift tık: ayarları aç\r\nx: ayarları gizle; program tepside çalışmaya devam eder\r\nbalonu taşımak için üstündeki tutamacı sürükle\r\ndüşük opaklık balonu daha saydam yapar";
+            help.Text = "fareyle metni seç ve düğmeyi bırak: seçilen bölümü çevir\r\nseçim desteklenmiyorsa imleç çevresindeki ocr kullanılır\r\nctrl + alt + z: çeviriyi aç / kapat\r\ntab: ocr balonu açıkken 15 satır çevir\r\nö simgesine çift tık: ayarları aç\r\nx: ayarları gizle; program tepside çalışmaya devam eder\r\nbalonu taşımak için üstündeki tutamacı sürükle\r\ndüşük opaklık balonu daha saydam yapar";
             help.Font = new Font("Segoe UI", 8.5f); help.AutoSize = true;
             help.Margin = new Padding(0, 12, 0, 12);
             layout.Controls.Add(help); layout.SetColumnSpan(help, 2);
@@ -299,6 +347,105 @@ namespace OzTranslate
         {
             if (e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); }
             base.OnFormClosing(e);
+        }
+    }
+
+    sealed class SelectedText
+    {
+        public string Text;
+        public Rectangle Bounds;
+    }
+
+    // UI Automation arka planda çalışır; kopyala tuşu göndermez, panoyu değiştirmez.
+    static class SelectionReader
+    {
+        static int _reading;
+        public static SelectedText Read(Point releasePoint, IntPtr foreground, Point? pressPoint = null)
+        {
+            // Yanıt vermeyen bir erişilebilirlik sağlayıcısı OCR işçisini kilitlemesin.
+            // Zaman aşımından sonra aynı anda yeni sağlayıcı çağrıları biriktirilmez.
+            if (Interlocked.CompareExchange(ref _reading, 1, 0) != 0) return null;
+            Task<SelectedText> task = Task.Run<SelectedText>(delegate
+            {
+                try { return ReadCore(releasePoint, foreground, pressPoint); }
+                finally { Interlocked.Exchange(ref _reading, 0); }
+            });
+            return task.Wait(1500) ? task.Result : null;
+        }
+
+        static SelectedText ReadCore(Point releasePoint, IntPtr foreground, Point? pressPoint)
+        {
+            if (foreground == IntPtr.Zero || NativeMethods.GetForegroundWindow() != foreground) return null;
+            try
+            {
+                AutomationElement atPoint = AutomationElement.FromPoint(new System.Windows.Point(releasePoint.X, releasePoint.Y));
+                SelectedText result = ReadAncestors(atPoint, releasePoint, pressPoint);
+                if (result == null) result = ReadAncestors(AutomationElement.FocusedElement, releasePoint, pressPoint);
+                return NativeMethods.GetForegroundWindow() == foreground ? result : null;
+            }
+            catch (Exception ex) { Logger.Log("Selection read error: " + ex.GetType().Name); return null; }
+        }
+
+        static SelectedText ReadAncestors(AutomationElement element, Point point, Point? pressPoint)
+        {
+            int ownProcess;
+            using (Process process = Process.GetCurrentProcess()) ownProcess = process.Id;
+            for (int depth = 0; element != null && depth < 12; depth++)
+            {
+                if (element.Current.IsPassword || element.Current.ProcessId == ownProcess) return null;
+                object value;
+                if (element.TryGetCurrentPattern(TextPattern.Pattern, out value))
+                {
+                    TextPattern pattern = (TextPattern)value;
+                    if (pattern.SupportedTextSelection != SupportedTextSelection.None)
+                    {
+                        TextPatternRange[] ranges = pattern.GetSelection();
+                        List<string> parts = new List<string>();
+                        List<Rectangle[]> rectangles = new List<Rectangle[]>();
+                        foreach (TextPatternRange range in ranges)
+                        {
+                            string part = range.GetText(-1);
+                            if (string.IsNullOrWhiteSpace(part)) continue;
+                            List<Rectangle> lines = new List<Rectangle>();
+                            foreach (System.Windows.Rect rect in range.GetBoundingRectangles())
+                            {
+                                if (rect.IsEmpty || rect.Width <= 0 || rect.Height <= 0) continue;
+                                Rectangle screen = Rectangle.FromLTRB((int)Math.Floor(rect.Left), (int)Math.Floor(rect.Top),
+                                    (int)Math.Ceiling(rect.Right), (int)Math.Ceiling(rect.Bottom));
+                                lines.Add(screen);
+                            }
+                            parts.Add(part); rectangles.Add(lines.ToArray());
+                        }
+                        SelectedText selection = Combine(parts, rectangles, point, pressPoint);
+                        if (selection != null) return selection;
+                    }
+                }
+                element = TreeWalker.ControlViewWalker.GetParent(element);
+            }
+            return null;
+        }
+
+        internal static SelectedText Combine(IList<string> parts, IList<Rectangle[]> rectangles, Point point, Point? pressPoint = null)
+        {
+            StringBuilder text = new StringBuilder();
+            Rectangle bounds = Rectangle.Empty;
+            bool nearPointer = false;
+            for (int i = 0; i < parts.Count; i++)
+            {
+                if (string.IsNullOrWhiteSpace(parts[i])) continue;
+                foreach (Rectangle line in rectangles[i])
+                {
+                    if (line.Width <= 0 || line.Height <= 0) continue;
+                    bounds = bounds.IsEmpty ? line : Rectangle.Union(bounds, line);
+                    Rectangle hit = line; hit.Inflate(12, 12);
+                    if (hit.Contains(point) || (pressPoint.HasValue && hit.Contains(pressPoint.Value))) nearPointer = true;
+                }
+                if (text.Length > 0) text.AppendLine();
+                text.Append(parts[i]);
+            }
+            // Önceki, başka yerde kalmış seçim veya boş imleç aralığı çevrilmez.
+            return nearPointer && TextPolicy.HasText(text.ToString())
+                ? new SelectedText { Text = text.ToString().Trim(), Bounds = bounds } : null;
         }
     }
 
@@ -639,6 +786,14 @@ namespace OzTranslate
 
         readonly NativeMethods.LowLevelKeyboardProc _hookProc;
         IntPtr _hookId = IntPtr.Zero;
+        readonly NativeMethods.LowLevelMouseProc _mouseProc;
+        IntPtr _mouseHookId = IntPtr.Zero;
+        bool _mouseDown, _selectionPending, _selectionPopup;
+        Point _selectionPoint;
+        Point _selectionStart;
+        IntPtr _selectionWindow;
+        IntPtr _selectionPopupWindow;
+        DateTime _selectionReadyAt;
 
         volatile bool _active = true;
         volatile int _generation = 0;
@@ -662,6 +817,7 @@ namespace OzTranslate
             });
             _settingsForm.VisibleChanged += delegate
             {
+                _selectionPending = false; _mouseDown = false;
                 _generation++; HidePopup(); _pending = true; _stillTicks = 0; _lastPos = Cursor.Position;
             };
 
@@ -719,10 +875,17 @@ namespace OzTranslate
                 NativeMethods.MOD_CONTROL | NativeMethods.MOD_ALT | NativeMethods.MOD_NOREPEAT, NativeMethods.VK_Z);
 
             _hookProc = HookProc;
+            _mouseProc = MouseHookProc;
             using (Process proc = Process.GetCurrentProcess())
             using (ProcessModule mod = proc.MainModule)
+            {
                 _hookId = NativeMethods.SetWindowsHookEx(NativeMethods.WH_KEYBOARD_LL, _hookProc,
                     NativeMethods.GetModuleHandle(mod.ModuleName), 0);
+                _mouseHookId = NativeMethods.SetMouseHook(NativeMethods.WH_MOUSE_LL, _mouseProc,
+                    NativeMethods.GetModuleHandle(mod.ModuleName), 0);
+            }
+            if (_mouseHookId == IntPtr.Zero)
+                _tray.ShowBalloonTip(5000, "Oz-translate", "metin seçimi dinleyicisi başlatılamadı; imleç ile ocr kullanılabilir.", ToolTipIcon.Warning);
 
             _timer = new System.Windows.Forms.Timer();
             _timer.Interval = TIMER_MS;
@@ -764,8 +927,26 @@ namespace OzTranslate
 
         void OnTick(object sender, EventArgs e)
         {
-            if (!_active || _settingsForm.Visible || _exiting) return;
+            if (!_active || _settingsForm.Visible || _exiting || _mouseDown) return;
             Point p = Cursor.Position;
+            if (_selectionPopup && NativeMethods.GetForegroundWindow() != _selectionPopupWindow)
+            {
+                _generation++; HidePopup(); return;
+            }
+            if (_selectionPending)
+            {
+                if (Math.Abs(p.X - _selectionPoint.X) > MOVE_THRESHOLD || Math.Abs(p.Y - _selectionPoint.Y) > MOVE_THRESHOLD)
+                {
+                    _selectionPending = false; _pending = true;
+                }
+                else
+                {
+                    if (DateTime.UtcNow < _selectionReadyAt || Interlocked.CompareExchange(ref _busy, 0, 0) != 0) return;
+                    _selectionPending = false;
+                    BeginSelection(_selectionPoint, _selectionStart, _selectionWindow, _generation);
+                    return;
+                }
+            }
             if (_popup.ContainsPointer(p))
             {
                 _lastPos = p; _stillTicks = 0; _popupGraceUntil = DateTime.UtcNow.AddMilliseconds(1000);
@@ -803,7 +984,7 @@ namespace OzTranslate
 
         IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam)
         {
-            if (nCode >= 0 && _active && _popupVisible && !_settingsForm.Visible && !_popup.Dragging)
+            if (nCode >= 0 && _active && _popupVisible && !_selectionPopup && !_settingsForm.Visible && !_popup.Dragging)
             {
                 int msg = wParam.ToInt32();
                 if (msg == NativeMethods.WM_KEYDOWN || msg == NativeMethods.WM_SYSKEYDOWN)
@@ -821,6 +1002,71 @@ namespace OzTranslate
                 }
             }
             return NativeMethods.CallNextHookEx(_hookId, nCode, wParam, lParam);
+        }
+
+        IntPtr MouseHookProc(int nCode, IntPtr wParam, IntPtr lParam)
+        {
+            if (nCode >= 0)
+            {
+                int message = wParam.ToInt32();
+                if (message == NativeMethods.WM_LBUTTONDOWN || message == NativeMethods.WM_LBUTTONUP)
+                {
+                    NativeMethods.MSLLHOOKSTRUCT data = (NativeMethods.MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(NativeMethods.MSLLHOOKSTRUCT));
+                    if (message == NativeMethods.WM_LBUTTONDOWN)
+                    {
+                        _mouseDown = _active && !_settingsForm.Visible && !_popup.ContainsPointer(data.pt);
+                        if (_mouseDown)
+                        {
+                            _selectionStart = data.pt;
+                            _generation++; _pending = false; _selectionPending = false;
+                            HidePopup();
+                        }
+                    }
+                    else if (_mouseDown)
+                    {
+                        _mouseDown = false;
+                        if (_active && !_settingsForm.Visible && !_exiting)
+                        {
+                            _generation++; _selectionPoint = data.pt; _lastPos = data.pt;
+                            _selectionWindow = NativeMethods.GetForegroundWindow();
+                            // Hedef uygulamanın MouseUp/çift tıklama seçimini tamamlamasını bekle.
+                            _selectionReadyAt = DateTime.UtcNow.AddMilliseconds(220);
+                            _selectionPending = true; _stillTicks = 0;
+                        }
+                    }
+                }
+            }
+            return NativeMethods.CallNextHookEx(_mouseHookId, nCode, wParam, lParam);
+        }
+
+        void BeginSelection(Point point, Point start, IntPtr window, int generation)
+        {
+            if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0) { _selectionPending = true; return; }
+            Task.Run(delegate
+            {
+                bool noSelection = false;
+                try
+                {
+                    if (generation != _generation) return;
+                    SelectedText selection = SelectionReader.Read(point, window, start);
+                    if (generation != _generation) return;
+                    if (selection == null) { noSelection = true; return; }
+                    string translated = Translator.TranslateSelection(selection.Text);
+                    if (string.IsNullOrWhiteSpace(translated)) { PostHide(generation); return; }
+                    PostShow(generation, translated, selection.Bounds, point, true, window);
+                }
+                catch (Exception ex) { Logger.Log("Selection translation error: " + ex.GetType().Name); PostHide(generation); }
+                finally
+                {
+                    Interlocked.Exchange(ref _busy, 0);
+                    if (noSelection && !_popup.IsDisposed)
+                        try { _popup.BeginInvoke((Action)delegate
+                        {
+                            if (generation != _generation || !_active || _exiting || _settingsForm.Visible) return;
+                            _pending = true; _pendingLines = 5; _stillTicks = 0;
+                        }); } catch { }
+                }
+            });
         }
 
         void BeginTranslate(Point p, int lines, int gen)
@@ -985,7 +1231,7 @@ namespace OzTranslate
             return text;
         }
 
-        void PostShow(int gen, string text, Rectangle block, Point cursor)
+        void PostShow(int gen, string text, Rectangle block, Point cursor, bool selection = false, IntPtr selectionWindow = default(IntPtr))
         {
             if (_popup.IsDisposed) return;
             try
@@ -993,8 +1239,11 @@ namespace OzTranslate
                 _popup.BeginInvoke((Action)delegate
                 {
                     if (gen != _generation || !_active || _exiting || _settingsForm.Visible) return;
+                    if (selection && NativeMethods.GetForegroundWindow() != selectionWindow) return;
                     _popup.ShowAt(text, block, cursor);
                     _translationPoint = cursor;
+                    _selectionPopup = selection;
+                    _selectionPopupWindow = selectionWindow;
                     _popupVisible = true;
                 });
             }
@@ -1017,6 +1266,7 @@ namespace OzTranslate
 
         void HidePopup()
         {
+            _selectionPopup = false;
             _popupGraceUntil = DateTime.MinValue;
             if (_popupVisible)
             {
@@ -1027,6 +1277,7 @@ namespace OzTranslate
 
         void ToggleActive()
         {
+            _mouseDown = false; _selectionPending = false;
             _active = !_active;
             _pending = _active; _stillTicks = 0;
             _miActive.Checked = _active;
@@ -1083,6 +1334,7 @@ namespace OzTranslate
             _settingsForm.Dispose();
             try { _timer.Stop(); } catch { }
             try { if (_hookId != IntPtr.Zero) NativeMethods.UnhookWindowsHookEx(_hookId); } catch { }
+            try { if (_mouseHookId != IntPtr.Zero) NativeMethods.UnhookWindowsHookEx(_mouseHookId); } catch { }
             try { NativeMethods.UnregisterHotKey(_hotkey.Handle, HOTKEY_ID); } catch { }
             try { _hotkey.Destroy(); } catch { }
             try { _tray.Visible = false; _tray.Dispose(); } catch { }

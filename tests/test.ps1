@@ -13,6 +13,9 @@ foreach ($name in @('System', 'System.Core', 'System.Drawing', 'System.Windows.F
 foreach ($name in @('Windows.Foundation', 'Windows.Media', 'Windows.Graphics', 'Windows.Storage', 'Windows.Globalization')) {
     $arguments += "/r:$metadata\$name.winmd"
 }
+foreach ($name in @('WindowsBase', 'UIAutomationClient', 'UIAutomationTypes')) {
+    $arguments += "/r:$framework\WPF\$name.dll"
+}
 $arguments += (Join-Path $repo 'OzTranslate.cs')
 $arguments += (Join-Path $PSScriptRoot 'RegressionTests.cs')
 & $compiler $arguments

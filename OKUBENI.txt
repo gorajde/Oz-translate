@@ -6,7 +6,8 @@ kurulum:
 
 kullanım ve kısayollar:
   fareyi metnin üzerinde yaklaşık yarım saniye tutun: 5 satır çeviri.
-  tab: balon açıkken 15 satır çeviri.
+  fareyle bir bölümü seçip sol düğmeyi bırakın: yalnızca seçimi çevir.
+  tab: ocr balonu açıkken 15 satır çeviri.
   ctrl + alt + z: çeviriyi aç / kapat.
   tepsideki ö simgesine çift tık: tek ayarlar penceresini aç.
   x: ayarları gizle; program çalışmaya devam eder.
@@ -34,6 +35,10 @@ ayarlar:
 gereksinimler:
   windows yerleşik ocr dil paketi ve internet bağlantısı gerekir.
   seçilen metin google çeviri servisine gönderilir.
+  seçim çevirisi, uygulamanın windows metin seçimi arayüzünü
+  desteklemesini gerektirir. destek yoksa imleç/ocr davranışı sürer.
+  pano değiştirilmez; ctrl+c gönderilmez. seçim yaparken ocr durur.
+  seçim balonunda tab normal işlevini sürdürür.
 
 derleme ve kaldırma:
   kaynak değiştiğinde build.bat çalıştırın; ek sdk gerekmez.

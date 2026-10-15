@@ -7,7 +7,8 @@ Fareyle ekran metnini okuyup Türkçeye çeviren Windows tepsi uygulaması. Wind
 | İşlem | Nasıl yapılır? |
 |---|---|
 | Çeviri | Fareyi metnin üzerinde yaklaşık yarım saniye tutun; 5 satırlık bağlam seçilir |
-| Daha uzun çeviri | Balon açıkken **Tab** ile 15 satır seçin |
+| Seçilen metni çevir | Fareyle istediğiniz bölümü seçip sol fare düğmesini bırakın; yalnızca seçilen bölüm çevrilir |
+| Daha uzun OCR çevirisi | OCR balonu açıkken **Tab** ile 15 satır seçin |
 | Çeviriyi aç / kapat | **Ctrl + Alt + Z** veya tepsi menüsündeki **Aktif** |
 | Ayarlar | Tepsideki **Ö** simgesine çift tıklayın veya menüden **Ayarlar** seçin |
 | Ayarları gizle | Pencerenin **X** düğmesine basın; program tepside çalışır |
@@ -15,6 +16,12 @@ Fareyle ekran metnini okuyup Türkçeye çeviren Windows tepsi uygulaması. Wind
 | Programdan çık | Tepsi menüsünden **Çıkış** seçin |
 
 Balon metni odağı almaz ve fare tıklamalarını alttaki uygulamaya geçirir. Yalnızca ayrı tutamaç sürükleme için fareyi yakalar. Tutamaca ulaşmak için fare hareketinden sonra yaklaşık bir saniye süre tanınır. Balon veya tutamaç üzerindeyken OCR duraklar. Ayarlar açıkken OCR ve çeviriye özel Tab işlemi duraklar; ayarlardaki normal Tab gezinmesi çalışır.
+
+## Seçilen metin
+
+Metnin bir kelimesini, birkaç cümlesini veya birden fazla satırını fareyle seçin. Sol düğmeyi bıraktıktan sonra seçim okunur ve çeviri balonu seçimin yanında gösterilir. Seçim balonu açıkken Tab normal işlevini sürdürür; seçim çevresindeki yazılar çeviriye eklenmez. Uzun seçimler kelime sınırlarından parçalara bölünerek çevrilir.
+
+Bu özellik, uygulamanın Windows UI Automation üzerinden metin seçimini sunmasını gerektirir. Panoya erişilmez ve Ctrl+C gönderilmez. Seçim sunulmuyorsa, boşsa veya ilgili uygulama yanıt vermiyorsa mevcut imleç/OCR davranışı devam eder. Çok kısa veya Türkçe seçimlerde mevcut dil ve aynı metin filtresi geçerlidir. Fareyle seçim sürerken OCR çalışmaz. Başka pencereye geçildiğinde eski seçimin çevirisi gösterilmez.
 
 ## Türkçe ve boş alan kontrolü
 
@@ -45,6 +52,8 @@ Kaldırmak için `Kaldir.bat` dosyasını çalıştırın. Program kapanır ve b
 PowerShell ile `tests/test.ps1` çalıştırılabilir. Bu kontroller dil/aynı metin filtresini, ayar doğrulamasını, JSON gidiş dönüşünü, pencereyi gizlemeyi ve gerçek Windows OCR ile imleç altında satır seçimini doğrular.
 
 `tests/test.ps1 -PreviewUI -LiveTranslation` ayrıca kısa süreli test pencereleri açar; tek ayarlar örneğini, Ctrl+Alt+Z mesajını, Tab isteğini, tutamaç sürükleme olaylarını ve canlı İngilizce/Türkçe çeviri örneklerini kontrol eder. Gerçek tuş basımı yerine ilgili mesaj/olay yolları çağrılır. Başlangıç tercihi değiştirilmez. Görünüm görüntüsü `tests/artifacts/settings.png` konumuna yazılır.
+
+Seçim testleri, gizli bir yerel RichTextBox kontrolünde gerçek UI Automation ile seçilen alt metnin okunmasını; çok satırlı seçimleri, eski/boş seçimlerin elenmesini ve uzun metnin eksiksiz parçalanmasını doğrular. Farklı tarayıcı, PDF ve masaüstü uygulamalarında fareyle uçtan uca seçim davranışı ayrıca denenmelidir.
 
 Elle tamamlanacak ortam kontrolleri: farklı ekran ölçekleri ve çoklu monitör, gerçek klavye ile kısayollar, Windows oturum açılışında otomatik başlatma. OCR dil paketi bulunmazsa uygulama tepsi bildirimi gösterir.
 

@@ -38,6 +38,41 @@ static class RegressionTests
             Check(TextPolicy.DisplayTranslation("İstanbul", "istanbul", "en") == "", "OCR dotted I comparison");
             Check(TextPolicy.DisplayTranslation("Settings", "...", "en") == "", "punctuation-only result");
 
+            List<string> selectedParts = new List<string> { "only this phrase" };
+            List<Rectangle[]> selectedRects = new List<Rectangle[]> { new Rectangle[] { new Rectangle(100, 100, 160, 20) } };
+            SelectedText selected = SelectionReader.Combine(selectedParts, selectedRects, new Point(260, 110));
+            Check(selected != null && selected.Text == "only this phrase", "selection reads only selected substring");
+            Check(selected.Bounds == new Rectangle(100, 100, 160, 20), "selection uses actual range bounds");
+            Check(SelectionReader.Combine(selectedParts, selectedRects, new Point(600, 300)) == null, "stale selection away from pointer ignored");
+            Check(SelectionReader.Combine(selectedParts, selectedRects, new Point(600, 300), new Point(110, 110)) != null,
+                "drag released outside text still recognizes selection from press position");
+            Check(SelectionReader.Combine(new List<string> { "" }, selectedRects, new Point(120, 110)) == null, "empty caret ignored");
+            Check(SelectionReader.Combine(new List<string> { "123" }, selectedRects, new Point(120, 110)) == null, "numeric selection ignored");
+            Check(SelectionReader.Combine(selectedParts, new List<Rectangle[]> { new Rectangle[0] }, new Point(120, 110)) == null, "offscreen selection ignored");
+            selectedParts.Add("second selected line");
+            selectedRects.Add(new Rectangle[] { new Rectangle(100, 130, 180, 20) });
+            selected = SelectionReader.Combine(selectedParts, selectedRects, new Point(280, 140));
+            Check(selected != null && selected.Text == "only this phrase" + Environment.NewLine + "second selected line", "multiline selection preserved");
+            Check(selected.Bounds == new Rectangle(100, 100, 180, 50), "multiline selection bounds combined");
+            Check(SelectionReader.Read(Point.Empty, IntPtr.Zero) == null, "invalid source window ignored");
+            Check(Translator.TranslateSelection("", delegate(string part) { throw new Exception("must not call"); }) == "", "empty selection never translated");
+            string sent = "";
+            Check(Translator.TranslateSelection("selected words", delegate(string part) { sent = part; return "seçili kelimeler"; }) == "seçili kelimeler"
+                && sent == "selected words", "translation receives selection without surrounding text");
+            Check(Translator.TranslateSelection("türkçe metin", delegate(string part) { return ""; }) == "", "Turkish selection suppressed");
+            string longText = new string('a', 970) + " " + new string('b', 970) + " " + new string('c', 970);
+            string reconstructed = ""; int chunks = 0; bool bounded = true;
+            Check(Translator.TranslateSelection(longText, delegate(string part)
+            {
+                bounded &= part.Length <= 1000;
+                reconstructed += part; chunks++; return "çeviri";
+            }).Length > 0 && reconstructed == longText && chunks == 3, "long selection translated completely");
+            Check(bounded, "selection chunks below URL limit");
+            chunks = 0;
+            string resultWithName = Translator.TranslateSelection(new string('a', 1000) + "Microsoft", delegate(string part)
+            { return ++chunks == 1 ? "çeviri" : ""; });
+            Check(resultWithName.Contains("Microsoft"), "unchanged chunk retained in translated selection");
+
             AppSettings settings = new AppSettings();
             Check(settings.FontSize == 12.5f && settings.OpacityPercent == 96, "defaults");
             settings.FontSize = float.NaN; settings.OpacityPercent = -1; settings.Validate();
@@ -53,6 +88,11 @@ static class RegressionTests
                 delegate(bool value) { startup = value; return true; }, delegate(AppSettings value) { }))
             {
                 form.CreateControl();
+                form.PerformLayout();
+                Control layout = form.Controls[0]; layout.PerformLayout();
+                bool fits = true;
+                foreach (Control control in layout.Controls) fits &= control.Bottom <= layout.ClientSize.Height;
+                Check(fits, "settings content fits enlarged window");
                 if (args.Length > 1 && args[1] == "True")
                 {
                     form.Show();
@@ -71,6 +111,28 @@ static class RegressionTests
                 typeof(SettingsForm).GetMethod("OnFormClosing", BindingFlags.Instance | BindingFlags.NonPublic)
                     .Invoke(form, new object[] { closing });
                 Check(closing.Cancel && !form.IsDisposed, "X hides reusable settings window");
+            }
+
+            // Gizli yerel kontrolle gerçek TextPattern seçimi; masaüstüne pencere açılmaz.
+            using (Form host = new Form())
+            using (RichTextBox editor = new RichTextBox())
+            {
+                host.Controls.Add(editor);
+                editor.Text = "before SELECTED WORDS after";
+                IntPtr editorHandle = editor.Handle;
+                editor.Select(7, 14);
+                var read = System.Threading.Tasks.Task.Run<string>(delegate
+                {
+                    var element = System.Windows.Automation.AutomationElement.FromHandle(editorHandle);
+                    object value;
+                    if (!element.TryGetCurrentPattern(System.Windows.Automation.TextPattern.Pattern, out value)) return null;
+                    var ranges = ((System.Windows.Automation.TextPattern)value).GetSelection();
+                    return ranges.Length == 1 ? ranges[0].GetText(-1) : null;
+                });
+                var deadline = System.Diagnostics.Stopwatch.StartNew();
+                while (!read.IsCompleted && deadline.ElapsedMilliseconds < 5000)
+                { Application.DoEvents(); System.Threading.Thread.Sleep(10); }
+                Check(read.IsCompleted && !read.IsFaulted && read.Result == "SELECTED WORDS", "real Windows UI Automation reads selected substring");
             }
             using (PopupForm popup = new PopupForm())
             {
